@@ -1,0 +1,17 @@
+major	minor	group	category	note	logic (given nMajor >= nMinor)
+gain	gain	gain_gain	gain		nMajor > exp_major_copy & nMinor > exp_minor_copy
+gain	neutral	gain_neutral	gain		nMajor > exp_major_copy & nMinor == exp_minor_copy
+gain	decrease	gain_decrease	mixed		nMajor > exp_major_copy & nMinor < exp_minor_copy & nMinor > 0
+gain	loss	gain_loss	loh		nMajor > exp_major_copy & nMinor == 0
+					
+neutral	gain	gain_neutral	gain	haploid regions only	nMajor == exp_major_copy & nMinor > exp_minor_copy 
+neutral	neutral	neutral_neutral	neutral		nMajor == exp_major_copy & nMinor == exp_minor_copy
+neutral	decrease	neutral_decrease	decrease		nMajor == exp_major_copy & nMinor < exp_minor_copy & nMinor > 0
+neutral	loss	neutral_loss	loh		nMajor == exp_major_copy & nMinor == 0
+					
+decrease	gain	gain_decrease	mixed	haploid regions only	nMajor < exp_major_copy & nMinor > exp_minor_copy
+decrease	neutral	neutral_decrease	decrease	haploid regions only	nMajor < exp_major_copy & nMinor == exp_minor_copy & nMajor > 0
+decrease	decrease	decrease_decrease	decrease		nMajor < exp_major_copy & nMinor < exp_minor_copy & nMinor > 0
+decrease	loss		loh		nMajor < exp_major_copy & nMajor > 0 & nMinor == 0
+					
+loss	loss		loss		nMajor == 0
