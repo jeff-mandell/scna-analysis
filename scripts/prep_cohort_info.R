@@ -5,8 +5,8 @@ cna_calls = fread('prepped_data/TCGA_ASCAT3_hg38.txt.gz')
 
 # Load in sex (needed for expected chrX copy)
 clinical = unique(clinical[case_submitter_id %in% cna_calls$patient_id, 
-                           .(patient_id = case_submitter_id,
+                           .(patient_id = case_submitter_id, project_id,
                              sex = fcase(gender == 'female', 'F', gender == 'male', 'M', default = NA))])
 clinical = clinical[patient_id %in% cna_calls$patient_id]
-fwrite(clinical, 'prepped_data/TCGA_patient_sex.txt', sep = "\t", na = 'NA')
+fwrite(clinical, 'prepped_data/TCGA_patient_info.txt', sep = "\t", na = 'NA')
 
