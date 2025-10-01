@@ -31,8 +31,10 @@ seg_rates = get_segmentation_rates(cna_calls = cna_calls, cna_burdens = prepped_
 # See the function itself for the approach used.
 gc = get_disjoint_gene_coord(gene_coord = ces.refset.hg38$cancer_gene_coord)
 gc = gc[, .(chr, start, end, gene1 = gene, gene1_anno = cancer_anno)]
-chr7_rates = get_cna_rates(chr = '7', cna_calls = cna_calls, seg_rates = seg_rates, rate_intervals = gc)
-
+gc[, rn := 1:.N]
+subset = gc[rn %% 5 == 0 | gene1_anno %in% c('oncogene', 'TSG')]
+gc[, rn := NULL]
+chr7_rates = get_cna_rates(chr = '7', cna_calls = cna_calls, seg_rates = seg_rates, rate_intervals = subset)
 
 
 ## run_round will run a collection of inferences across the input chromosomal intervals
@@ -46,7 +48,7 @@ run_round = function(fixed_events = data.table(), rates = NULL, cores = 1) {
   for_events = unique(rates$rates[, .(event_type, range_id)])
   if(fixed_events[, .N] > 0) {
     stopifnot(all(c('range_id', 'event_type') %in% names(fixed_events)))
-    for_events = for_events[! fixed_events$range_id, on = 'range_id']
+    for_events = for_events[! fixed_events, on = c('range_id', 'event_type')]
     events_to_test = split(fixed_events$range_id, fixed_events$event_type)
   } else {
     events_to_test = list()
@@ -70,7 +72,13 @@ run_round = function(fixed_events = data.table(), rates = NULL, cores = 1) {
   num_samples = sapply(output, function(x) length(x$info$included_samples))
   si_out[, loglik := ll[run]] # same order
   si_out[, num_samples := num_samples[run]]
-  si_out[, is_fixed := range_id %in% fixed_events$range_id]
+  if(fixed_events[, .N] > 0) {
+    si_out[fixed_events, is_fixed := TRUE, on = c('range_id', 'event_type')]
+    si_out[is.na(is_fixed), is_fixed := FALSE]
+  } else {
+    si_out[, is_fixed := FALSE]
+  }
+
   
   anno_cols = intersect(c('gene1', 'all_genes'), names(si_out))
   setcolorder(si_out, c('run', 'range_id', 'event_type', 'si', anno_cols))
@@ -137,15 +145,26 @@ plot_round = function(round_output) {
 
 # Run inference over all intervals (decreases and increases).
 # Adjust cores as necessary for your system.
-r1 = run_round(rates = chr7_rates, cores = 4)
+r1 = run_round(rates = chr7_rates, cores = 2)
 p1 = plot_round(r1)
 
-# EGFR decrease (negatively selected) is the third-best by likelihood, and we'll choose it.
+# EGFR decrease (negatively selected) is the best by likelihood, and we'll choose it.
+stopifnot(r1[order(-loglik), gene1[1] == 'EGFR'])
 to_fix_in_r2 = r1[order(-loglik)][gene1 == 'EGFR', .(range_id, event_type)][1]
-r2 = run_round(fixed_events = to_fix_in_r2, rates = chr7_rates, cores = 4)
 
-# Keep in mind, inferences with both increase and decrease effects are currently wrong.
+r2 = run_round(fixed_events = to_fix_in_r2, rates = chr7_rates, cores = 2)
+
 p2 = plot_round(r2)
+ggsave(file.path(output_dir, 'chr7_two_rounds.png'), p2,
+       width = 8, height = 6)
+
+# Examine other genes in top runs
+# Issue: By likelihood, the best models use sites right next to EGFR. My guess is that this way,
+# the model doesn't have to explain as much.
+r2[order(-loglik)][is_fixed == F]
+
+saveRDS(list(r1 = r1, r2 = r2, chr7_rates = chr7_rates),
+        file.path(output_dir, 'curr_chr7_output.rds'))
 
 ## Combine all plots (to be continued...)
 # all_plots = list(p1, p2)
