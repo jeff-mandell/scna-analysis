@@ -36,20 +36,25 @@ subset = gc[rn %% 5 == 0 | gene1_anno %in% c('oncogene', 'TSG')]
 gc[, rn := NULL]
 chr7_rates = get_cna_rates(chr = '7', cna_calls = cna_calls, seg_rates = seg_rates, rate_intervals = subset)
 
+# REQUIRED for current model: Get rid of sample-segments that cause problems for model.
+chr7_rates = clean_rates(chr7_rates)
+
+
+# Now we have all segments that can be used in every inference.
 
 ## run_round will run a collection of inferences across the input chromosomal intervals
-# fixed_events: data.table(); see example below.
-# rates: from get_cna_rates()
-run_round = function(fixed_events = data.table(), rates = NULL, cores = 1) {
-  if(! is.data.table(fixed_events)) {
-    stop('fixed_events should be data.table.')
+# always_selected: data.table(); see example below.
+# rates: from get_cna_rates(); for now, must also be processed as shown above.
+run_round = function(always_selected = data.table(), rates = NULL, cores = 1, debug = FALSE) {
+  if(! is.data.table(always_selected)) {
+    stop('always_selected should be data.table.')
   }
   
   for_events = unique(rates$rates[, .(event_type, range_id)])
-  if(fixed_events[, .N] > 0) {
-    stopifnot(all(c('range_id', 'event_type') %in% names(fixed_events)))
-    for_events = for_events[! fixed_events, on = c('range_id', 'event_type')]
-    events_to_test = split(fixed_events$range_id, fixed_events$event_type)
+  if(always_selected[, .N] > 0) {
+    stopifnot(all(c('range_id', 'event_type') %in% names(always_selected)))
+    for_events = for_events[! always_selected, on = c('range_id', 'event_type')]
+    events_to_test = split(always_selected$range_id, always_selected$event_type)
   } else {
     events_to_test = list()
   }
@@ -62,7 +67,7 @@ run_round = function(fixed_events = data.table(), rates = NULL, cores = 1) {
                      function(curr_event) {
                        curr_to_test = copy(events_to_test)
                        curr_to_test[[curr_event_type]] = c(curr_to_test[[curr_event_type]], curr_event)
-                       return(run_seg_multi(events_to_test = curr_to_test, rates = rates))
+                       return(run_seg_multi(events_to_test = curr_to_test, rates = rates, debug = debug))
                      }, cl = cores)
          })
   output = unlist(output, recursive = FALSE, use.names = FALSE)
@@ -72,8 +77,8 @@ run_round = function(fixed_events = data.table(), rates = NULL, cores = 1) {
   num_samples = sapply(output, function(x) length(x$info$included_samples))
   si_out[, loglik := ll[run]] # same order
   si_out[, num_samples := num_samples[run]]
-  if(fixed_events[, .N] > 0) {
-    si_out[fixed_events, is_fixed := TRUE, on = c('range_id', 'event_type')]
+  if(always_selected[, .N] > 0) {
+    si_out[always_selected, is_fixed := TRUE, on = c('range_id', 'event_type')]
     si_out[is.na(is_fixed), is_fixed := FALSE]
   } else {
     si_out[, is_fixed := FALSE]
@@ -114,13 +119,10 @@ plot_round = function(round_output) {
   fill_legend[, legend_order := match(inner_fill, palette)]
   fill_legend = fill_legend[order(legend_order)]
   
-
-  # fp[, border_color := fcase(is_fixed == TRUE, 'darkmagenta',
-  #    default = inner_fill)]
-  
   for_fixed_labels = fp[is_fixed == T]
   fp[is_fixed == T, gene_label := NA]
-  
+  for_fixed_labels[is.na(gene_label), gene_label := gene] # even plotting unimportant genes
+
   gg = ggplot(fp, aes(x = mp, y = si)) + 
     geom_rect(data = chr_info, aes(xmin = cen_start, xmax = cen_end, 
                   ymin = -Inf, ymax = Inf), fill = 'gray95',
@@ -145,18 +147,25 @@ plot_round = function(round_output) {
 
 # Run inference over all intervals (decreases and increases).
 # Adjust cores as necessary for your system.
-r1 = run_round(rates = chr7_rates, cores = 2)
+r1 = run_round(rates = chr7_rates, cores = 2, debug = T)
 p1 = plot_round(r1)
+ggsave(file.path(output_dir, 'chr7_r1.png'), p1,
+       width = 8, height = 6)
 
-# EGFR decrease (negatively selected) is the best by likelihood, and we'll choose it.
-stopifnot(r1[order(-loglik), gene1[1] == 'EGFR'])
+# EGFR decrease (negatively selected) is the third-best by likelihood, and we'll choose it.
+stopifnot(r1[order(-loglik), gene1[3] == 'EGFR'])
 to_fix_in_r2 = r1[order(-loglik)][gene1 == 'EGFR', .(range_id, event_type)][1]
 
-r2 = run_round(fixed_events = to_fix_in_r2, rates = chr7_rates, cores = 2)
+r2 = run_round(always_selected = to_fix_in_r2, rates = chr7_rates, cores = 2)
 
 p2 = plot_round(r2)
 ggsave(file.path(output_dir, 'chr7_two_rounds.png'), p2,
        width = 8, height = 6)
+
+to_fix_in_r3 = rbind(to_fix_in_r2,
+                     r2[order(-loglik)][is_fixed == FALSE, .(range_id, event_type)][1])
+
+r3 = run_round(always_selected = to_fix_in_r3, rates = chr7_rates, cores = 2)
 
 # Examine other genes in top runs
 # Issue: By likelihood, the best models use sites right next to EGFR. My guess is that this way,
@@ -167,16 +176,26 @@ saveRDS(list(r1 = r1, r2 = r2, chr7_rates = chr7_rates),
         file.path(output_dir, 'curr_chr7_output.rds'))
 
 ## Combine all plots (to be continued...)
-# all_plots = list(p1, p2)
-# all_plots = lapply(all_plots,
-#                    function(x) x + xlab('') + ylab('Effect') +
-#                      theme(strip.background = element_blank(),
-#                            strip.text = element_blank()))
-# grid = cowplot::plot_grid(plotlist = all_plots, ncol = 1,
-#                    labels = paste0('Round ', 1:4), label_size = 10,
-#                    label_x = 0, vjust = 0.3)
+all_plots = list(p1, p2)
+all_plots = lapply(all_plots,
+                   function(x) x + xlab('') + ylab('Effect') +
+                     theme(strip.background = element_blank(),
+                           strip.text = element_blank()))
+grid = cowplot::plot_grid(plotlist = all_plots, ncol = 1,
+                   labels = paste0('Round ', 1:4), label_size = 10,
+                   label_x = 0, vjust = 0.3)
 # # Add empty plot for sufficient whitespace at the top
 # grid = cowplot::plot_grid(ggplot() + theme_void(), grid, rel_heights = c(.04, .96), nrow = 2)
 
 
+
+# tmp = run_seg_multi(events_to_test = list(increase = c(to_test$range_id, 'chr7.10'),
+#                                     decrease = to_test$range_id), rates = chr7_rates)
+#               
+# chr13_rates = get_cna_rates(chr = '13', cna_calls = cna_calls, seg_rates = seg_rates, rate_intervals = subset)
+# chr13_r1 = run_round(rates = chr13_rates)
+# 
+# # Top result is selection against RB1 increase
+# chr13_fix_r2 = data.table(range_id = 'chr13.33', event_type = 'increase')
+# chr13_r2 = run_round(chr13_fix_r2, rates = chr13_rates, cores = 2)
 
