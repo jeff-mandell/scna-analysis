@@ -12,7 +12,7 @@ stopifnot(packageVersion('ces.refset.hg38') >= as.package_version('1.3.0.9000'))
 
 # cancereffectsizeR v3 also from dev branch. Rather than installing with install_github,
 # clone the repo and use devtools as shown above.
-stopifnot(packageVersion('cancereffectsizeR') >= as.package_version('3.0.0.9000'))
+stopifnot(packageVersion('cancereffectsizeR') >= as.package_version('3.0.0.9002'))
 
 # You also need a custom installation of BISCUT.
 if(! require('BISCUT') || packageVersion('BISCUT') < as.package_version('1.2')) {
@@ -43,9 +43,8 @@ prepped_calls = prep_ASCAT3_segments(segments = cna_calls, refset = 'ces.refset.
 
 # Adjust cores as necessary for your system.
 prepped_calls = call_large_events(prepped_calls = prepped_calls, arm_chr_threshold = .99, 
-                                 cores = 4, account_biscut_regions = TRUE, 
-                                 biscut_dir = file.path(output_dir, 'biscut-out'),
-                                 run_biscut = FALSE)
+                                 cores = 4, account_biscut_regions = TRUE,
+                                 run_biscut = TRUE)
 
 
 
